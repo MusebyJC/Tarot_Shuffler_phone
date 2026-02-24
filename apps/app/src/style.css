@@ -79,67 +79,187 @@ html, body{
 
 .logo-wrap{
   width: clamp(160px, 42vw, 280px);
-  display: flex;
-  justify-content: center;
+  aspect-ratio: 1 / 1;
+  display: grid;
+  place-items: center;
   margin-bottom: 1.2vh;
   position: relative;
   isolation: isolate;
+  overflow: hidden;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(24, 16, 44, 0.20) 0%,
+    rgba(12, 10, 24, 0.44) 72%,
+    rgba(8, 8, 16, 0.66) 100%
+  );
+}
+
+.logo-wrap::before{
+  content: "";
+  position: absolute;
+  inset: -6%;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(
+    74% 74% at 50% 50%,
+    rgba(255, 210, 90, 0.24) 0%,
+    rgba(155, 92, 255, 0.16) 44%,
+    rgba(10, 10, 18, 0.00) 74%,
+    rgba(10, 10, 18, 0.46) 92%,
+    rgba(10, 10, 18, 0.78) 100%
+  );
+  filter: blur(6px);
+  opacity: 0.76;
 }
 
 .logo-wrap::after{
   content: "";
   position: absolute;
-  inset: 6% 8%;
-  z-index: 0;
+  inset: 0;
+  z-index: 2;
   pointer-events: none;
   border-radius: 50%;
   background: radial-gradient(
-    72% 68% at 50% 50%,
-    rgba(255, 210, 90, 0.20) 0%,
-    rgba(155, 92, 255, 0.12) 42%,
-    rgba(10, 10, 18, 0.00) 70%,
-    rgba(10, 10, 18, 0.34) 88%,
-    rgba(10, 10, 18, 0.72) 100%
+    circle at 50% 50%,
+    rgba(10, 10, 18, 0.00) 52%,
+    rgba(10, 10, 18, 0.08) 64%,
+    rgba(10, 10, 18, 0.24) 76%,
+    rgba(10, 10, 18, 0.46) 88%,
+    rgba(10, 10, 18, 0.72) 94%,
+    rgba(10, 10, 18, 0.92) 100%
   );
-  filter: blur(6px);
-  opacity: 0.78;
+  filter: blur(2.2px);
+  animation: logoEdgeFeather 6s ease-in-out infinite;
+}
+
+.logo-crystal-overlay{
+  position: absolute;
+  inset: 2%;
+  z-index: 3;
+  pointer-events: none;
+  border-radius: 50%;
+  mix-blend-mode: screen;
+  background:
+    radial-gradient(circle at 30% 26%, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.10) 14%, rgba(255,255,255,0) 34%),
+    radial-gradient(circle at 70% 78%, rgba(155,92,255,0.20) 0%, rgba(155,92,255,0) 36%),
+    conic-gradient(from 200deg at 50% 50%, rgba(255,255,255,0) 0deg 292deg, rgba(255,238,172,0.20) 320deg 338deg, rgba(255,255,255,0) 360deg);
+  -webkit-mask-image: radial-gradient(
+    circle at 50% 50%,
+    #000 0%,
+    #000 72%,
+    rgba(0, 0, 0, 0.88) 82%,
+    rgba(0, 0, 0, 0.48) 90%,
+    rgba(0, 0, 0, 0.14) 96%,
+    transparent 100%
+  );
+  mask-image: radial-gradient(
+    circle at 50% 50%,
+    #000 0%,
+    #000 72%,
+    rgba(0, 0, 0, 0.88) 82%,
+    rgba(0, 0, 0, 0.48) 90%,
+    rgba(0, 0, 0, 0.14) 96%,
+    transparent 100%
+  );
+  filter: blur(0.45px);
+  opacity: 0;
+  animation:
+    crystalBallReveal 2.2s cubic-bezier(0.16, 0.72, 0.16, 1) forwards,
+    crystalBallGlint 7.2s cubic-bezier(0.28, 0.12, 0.24, 0.96) 0.9s infinite,
+    crystalBallPulse 4.8s ease-in-out 0.9s infinite;
 }
 
 .picker-logo{
   width: 100%;
-  height: auto;
+  height: 100%;
   display: block;
+  object-fit: contain;
   position: relative;
   z-index: 1;
+  transform: scale(1.08);
   -webkit-mask-image: radial-gradient(
-    120% 108% at 50% 46%,
-    #000 56%,
-    rgba(0, 0, 0, 0.94) 68%,
-    rgba(0, 0, 0, 0.62) 82%,
-    rgba(0, 0, 0, 0.18) 92%,
+    circle at 50% 50%,
+    #000 58%,
+    rgba(0, 0, 0, 0.96) 68%,
+    rgba(0, 0, 0, 0.76) 80%,
+    rgba(0, 0, 0, 0.42) 90%,
+    rgba(0, 0, 0, 0.14) 96%,
     transparent 100%
   );
   mask-image: radial-gradient(
-    120% 108% at 50% 46%,
-    #000 56%,
-    rgba(0, 0, 0, 0.94) 68%,
-    rgba(0, 0, 0, 0.62) 82%,
-    rgba(0, 0, 0, 0.18) 92%,
+    circle at 50% 50%,
+    #000 58%,
+    rgba(0, 0, 0, 0.96) 68%,
+    rgba(0, 0, 0, 0.76) 80%,
+    rgba(0, 0, 0, 0.42) 90%,
+    rgba(0, 0, 0, 0.14) 96%,
     transparent 100%
   );
-  -webkit-mask-size: 100% 100%;
-  mask-size: 100% 100%;
+  -webkit-mask-size: 108% 108%;
+  mask-size: 108% 108%;
+  -webkit-mask-position: center;
+  mask-position: center;
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
+  transition: filter .42s ease, opacity .42s ease;
   filter:
-    drop-shadow(0 0 10px rgba(255,210,90,0.32))
-    drop-shadow(0 0 20px rgba(155,92,255,0.28));
+    drop-shadow(0 0 10px rgba(255,210,90,0.34))
+    drop-shadow(0 0 20px rgba(155,92,255,0.30));
 }
 
 .picker-logo.frozen{
+  opacity: 0.985;
   filter:
     drop-shadow(0 0 9px rgba(255,210,90,0.42))
     drop-shadow(0 0 16px rgba(155,92,255,0.22));
+}
+
+.picker-logo.frozen + .logo-crystal-overlay{
+  opacity: 0.74;
+}
+
+@keyframes crystalBallGlint{
+  0%{
+    transform: rotate(0deg) scale(1);
+  }
+  50%{
+    transform: rotate(180deg) scale(1.018);
+  }
+  100%{
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+@keyframes crystalBallReveal{
+  0%{
+    opacity: 0;
+  }
+  60%{
+    opacity: 0.24;
+  }
+  100%{
+    opacity: 0.54;
+  }
+}
+
+@keyframes crystalBallPulse{
+  0%, 100%{
+    filter: brightness(1) saturate(1);
+  }
+  50%{
+    filter: brightness(1.2) saturate(1.18);
+  }
+}
+
+@keyframes logoEdgeFeather{
+  0%, 100%{
+    opacity: 0.88;
+  }
+  50%{
+    opacity: 1;
+  }
 }
 
 .picker-title{ font-size: clamp(18px, 5vw, 28px); margin: 0 0 0.5vh; }

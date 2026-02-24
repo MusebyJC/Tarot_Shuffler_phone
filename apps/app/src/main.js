@@ -373,6 +373,9 @@ function loadGifWithGuard(imgEl, url, timeoutMs = 1500) {
 let logoStillFrameDataUrl = null;
 let logoFreezeTimer = null;
 let logoDecodePromise = null;
+let logoStillReady = false;
+let logoStillPrimePromise = null;
+let logoPlaybackStartedAt = 0;
 let loadingTimer = null;
 let loadingRunId = 0;
 let spreadCenteringRaf = 0;
@@ -426,9 +429,50 @@ function applyLogoStillFrame() {
   if (!logoEl) return false;
   if (!logoStillFrameDataUrl) return false;
 
-  logoEl.src = logoStillFrameDataUrl;
-  logoEl.classList.add('frozen');
+  if (logoEl.classList.contains('frozen') && logoEl.src === logoStillFrameDataUrl) {
+    return true;
+  }
+
+  const commitSwap = () => {
+    const currentLogoEl = document.getElementById('appLogo');
+    if (!currentLogoEl) return;
+    currentLogoEl.src = logoStillFrameDataUrl;
+    currentLogoEl.classList.add('frozen');
+  };
+
+  // Double-rAF helps avoid paint tearing on iOS during GIF->PNG source swap.
+  requestAnimationFrame(() => requestAnimationFrame(commitSwap));
   return true;
+}
+
+function primeLogoStillFrame(dataUrl) {
+  if (!dataUrl) return Promise.resolve(false);
+  if (logoStillReady && logoStillFrameDataUrl === dataUrl) return Promise.resolve(true);
+  if (logoStillPrimePromise) return logoStillPrimePromise;
+
+  logoStillPrimePromise = new Promise((resolve) => {
+    const probe = new Image();
+    let settled = false;
+    const done = (ok) => {
+      if (settled) return;
+      settled = true;
+      logoStillReady = ok;
+      resolve(ok);
+    };
+
+    probe.onload = () => done(true);
+    probe.onerror = () => done(false);
+    probe.decoding = 'async';
+    probe.src = dataUrl;
+
+    if (typeof probe.decode === 'function') {
+      probe.decode().then(() => done(true)).catch(() => {});
+    }
+  }).finally(() => {
+    logoStillPrimePromise = null;
+  });
+
+  return logoStillPrimePromise;
 }
 
 async function decodeLogoStillAndDuration() {
@@ -453,9 +497,22 @@ async function decodeLogoStillAndDuration() {
 
 function scheduleLogoFreeze(durationMs) {
   clearTimeout(logoFreezeTimer);
-  const freezeAt = Math.max(650, Math.round(durationMs - 40));
+  const cycleMs = Math.max(900, Math.round(durationMs));
+  const startedAt = logoPlaybackStartedAt || performance.now();
+  const elapsedMs = Math.max(0, performance.now() - startedAt);
+  const cyclePosMs = elapsedMs % cycleMs;
+  const remainingMs = cycleMs - cyclePosMs;
+  const freezeLeadMs = 16;
+  const freezeAt = Math.max(48, Math.round(remainingMs - freezeLeadMs));
+
   logoFreezeTimer = setTimeout(() => {
     logoFreezeTimer = null;
+    if (!logoStillReady && logoStillFrameDataUrl) {
+      void primeLogoStillFrame(logoStillFrameDataUrl).finally(() => {
+        applyLogoStillFrame();
+      });
+      return;
+    }
     applyLogoStillFrame();
   }, freezeAt);
 }
@@ -471,10 +528,14 @@ function setupPickerLogo() {
   }
 
   if (logoFreezeTimer) return;
+  logoPlaybackStartedAt = performance.now();
 
   decodeLogoStillAndDuration()
     .then(({ durationMs, stillDataUrl }) => {
-      if (stillDataUrl) logoStillFrameDataUrl = stillDataUrl;
+      if (stillDataUrl) {
+        logoStillFrameDataUrl = stillDataUrl;
+        void primeLogoStillFrame(stillDataUrl);
+      }
       scheduleLogoFreeze(durationMs);
     })
     .catch(() => {
@@ -965,6 +1026,7 @@ function renderPickerDeck() {
     <div class="picker-screen">
       <div class="logo-wrap">
         <img id="appLogo" class="picker-logo" src="${appLogoGif}" alt="Tarot" />
+        <span class="logo-crystal-overlay" aria-hidden="true"></span>
       </div>
     
       <h1 class="picker-heading">TAROT</h1>
