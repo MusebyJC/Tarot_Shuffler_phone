@@ -36,6 +36,7 @@ const SHUFFLE_BACK_GUARD_MAX_MS = 900;
 const SHUFFLE_BACK_GUARD_FACTOR = 0.35;
 const BUTTON_JSON_CLICK_DELAY_MS = 520;
 const PICKER_WHEEL_ICON_REST_DELAY_MS = 180;
+const SPREAD_CENTER_FIT_TOLERANCE_PX = 72;
 
 // Screen control Lotties
 const ICONS = {
@@ -374,6 +375,8 @@ let logoFreezeTimer = null;
 let logoDecodePromise = null;
 let loadingTimer = null;
 let loadingRunId = 0;
+let spreadCenteringRaf = 0;
+let spreadResizeBound = false;
 
 function buildLogoStillFrame(gifWidth, gifHeight, frames) {
   if (!frames || !frames.length) return null;
@@ -1400,7 +1403,65 @@ function chunkIntoRows(cards) {
   return rows;
 }
 
-function syncSpreadCardAspectRatios() {
+function applySpreadVerticalCentering() {
+  if (screen !== 'spread') return;
+  const spreadScreenEl = document.querySelector('.spread-screen');
+  const spreadAreaEl = document.querySelector('.spread-area');
+  if (!spreadAreaEl || !spreadScreenEl) return;
+
+  const getOuterHeight = (el) => {
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
+    const cs = window.getComputedStyle(el);
+    const marginTop = parseFloat(cs.marginTop || '0') || 0;
+    const marginBottom = parseFloat(cs.marginBottom || '0') || 0;
+    return rect.height + marginTop + marginBottom;
+  };
+
+  const headerEl = spreadScreenEl.querySelector('.spread-header');
+  const actionsEl = spreadScreenEl.querySelector('.spread-actions');
+  const headerOuterH = getOuterHeight(headerEl);
+  const actionsOuterH = getOuterHeight(actionsEl);
+  const centerOffsetPx = Math.round((actionsOuterH - headerOuterH) / 2);
+
+  // reset any inline offset styles before measuring
+  spreadAreaEl.style.setProperty('--spread-fit-center-offset', '0px');
+  const overflowPx = spreadAreaEl.scrollHeight - spreadAreaEl.clientHeight;
+  const fitsWithoutScroll = overflowPx <= SPREAD_CENTER_FIT_TOLERANCE_PX;
+  const forceCenter = spreadAreaEl.dataset.forceCenter === '1';
+  const shouldCenter = forceCenter || fitsWithoutScroll;
+  spreadAreaEl.classList.toggle('fit-centered', shouldCenter);
+  if (shouldCenter) {
+    spreadAreaEl.style.setProperty('--spread-fit-center-offset', `${centerOffsetPx}px`);
+    if (overflowPx <= 2) spreadAreaEl.scrollTop = 0;
+  }
+}
+
+function queueSpreadVerticalCentering() {
+  if (screen !== 'spread') return;
+  cancelAnimationFrame(spreadCenteringRaf);
+  spreadCenteringRaf = requestAnimationFrame(() => {
+    spreadCenteringRaf = requestAnimationFrame(() => {
+      spreadCenteringRaf = 0;
+      applySpreadVerticalCentering();
+    });
+  });
+}
+
+function bindSpreadResizeCentering() {
+  if (spreadResizeBound || typeof window === 'undefined') return;
+  window.addEventListener('resize', () => {
+    if (screen !== 'spread') return;
+    queueSpreadVerticalCentering();
+  });
+  spreadResizeBound = true;
+}
+
+function syncSpreadCardAspectRatios(onLayoutChange) {
+  const notifyLayout = () => {
+    if (typeof onLayoutChange === 'function') onLayoutChange();
+  };
+
   document.querySelectorAll('.spread-card').forEach((cardEl) => {
     const img = cardEl.querySelector('.spread-img');
     if (!img) return;
@@ -1410,10 +1471,14 @@ function syncSpreadCardAspectRatios() {
       const h = img.naturalHeight || 0;
       if (!w || !h) return;
       cardEl.style.aspectRatio = `${w} / ${h}`;
+      notifyLayout();
     };
 
     if (img.complete && img.naturalWidth > 0) applyAspect();
-    else img.addEventListener('load', applyAspect, { once: true });
+    else {
+      img.addEventListener('load', applyAspect, { once: true });
+      img.addEventListener('error', notifyLayout, { once: true });
+    }
   });
 }
 
@@ -1423,6 +1488,7 @@ function renderSpread() {
   const deckInfo = DECK_LIST[currentDeckIdx];
   const n = drawnCards.length;
   const rows = chunkIntoRows(drawnCards);
+  const forceCenter = n >= 5 && n <= 7;
 
   const areaClass = n <= 4 ? 'spread-area single' : 'spread-area scrolling';
 
@@ -1432,7 +1498,7 @@ function renderSpread() {
         <span class="spread-title">${deckInfo.name} · ${n}-Card Spread</span>
       </div>
 
-      <div class="${areaClass}">
+      <div class="${areaClass}" data-force-center="${forceCenter ? '1' : '0'}">
         ${rows.map((row) => `
           <div class="spread-row cols-${row.cols}">
             ${row.cards.map((card) => {
@@ -1501,7 +1567,17 @@ function renderSpread() {
   mountLottieInteractive(document.getElementById('iconCopySpread'), ICONS.result_screen.copy_spread, spreadIconLastFrameOpts).catch(() => {});
   mountLottieInteractive(document.getElementById('iconSpreadDetail'), ICONS.result_screen.view_details, spreadIconLastFrameOpts).catch(() => {});
   mountLottieInteractive(document.getElementById('iconSpreadHome'), ICONS.result_screen.home, spreadHomeFirstFrameOpts).catch(() => {});
-  syncSpreadCardAspectRatios();
+  bindSpreadResizeCentering();
+  syncSpreadCardAspectRatios(queueSpreadVerticalCentering);
+  queueSpreadVerticalCentering();
+  setTimeout(() => {
+    if (screen !== 'spread') return;
+    queueSpreadVerticalCentering();
+  }, 120);
+  setTimeout(() => {
+    if (screen !== 'spread') return;
+    queueSpreadVerticalCentering();
+  }, 320);
   persistSession();
 }
 

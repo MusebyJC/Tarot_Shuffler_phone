@@ -82,12 +82,55 @@ html, body{
   display: flex;
   justify-content: center;
   margin-bottom: 1.2vh;
+  position: relative;
+  isolation: isolate;
+}
+
+.logo-wrap::after{
+  content: "";
+  position: absolute;
+  inset: 6% 8%;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(
+    72% 68% at 50% 50%,
+    rgba(255, 210, 90, 0.20) 0%,
+    rgba(155, 92, 255, 0.12) 42%,
+    rgba(10, 10, 18, 0.00) 70%,
+    rgba(10, 10, 18, 0.34) 88%,
+    rgba(10, 10, 18, 0.72) 100%
+  );
+  filter: blur(6px);
+  opacity: 0.78;
 }
 
 .picker-logo{
   width: 100%;
   height: auto;
   display: block;
+  position: relative;
+  z-index: 1;
+  -webkit-mask-image: radial-gradient(
+    120% 108% at 50% 46%,
+    #000 56%,
+    rgba(0, 0, 0, 0.94) 68%,
+    rgba(0, 0, 0, 0.62) 82%,
+    rgba(0, 0, 0, 0.18) 92%,
+    transparent 100%
+  );
+  mask-image: radial-gradient(
+    120% 108% at 50% 46%,
+    #000 56%,
+    rgba(0, 0, 0, 0.94) 68%,
+    rgba(0, 0, 0, 0.62) 82%,
+    rgba(0, 0, 0, 0.18) 92%,
+    transparent 100%
+  );
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
   filter:
     drop-shadow(0 0 10px rgba(255,210,90,0.32))
     drop-shadow(0 0 20px rgba(155,92,255,0.28));
@@ -1126,6 +1169,17 @@ button.tap-feedback{
   padding-bottom: 1vh;
 }
 .spread-area.scrolling::-webkit-scrollbar{ display:none; }
+
+.spread-area.fit-centered{
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  transform: translateY(var(--spread-fit-center-offset, 0px));
+}
+
+.spread-area.scrolling.fit-centered{
+  overflow-y: auto;
+}
 
 /* Keep the same card size across rows when spread has 5+ cards. */
 .spread-area.scrolling .spread-row{
