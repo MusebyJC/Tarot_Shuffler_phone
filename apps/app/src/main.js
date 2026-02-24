@@ -857,15 +857,64 @@ async function copyTextToClipboard(text) {
   }
 }
 
-function showToast(msg) {
+function showToast(msg, options = {}) {
+  const {
+    anchorEl = null,
+    thrown = false,
+    tone = 'neutral',
+    durationMs = 1400
+  } = options;
+
   const el = document.getElementById('toast');
   if (!el) return;
 
-  el.textContent = msg;
-  el.classList.add('show');
+  const clearThrowVars = () => {
+    el.style.removeProperty('--toast-x');
+    el.style.removeProperty('--toast-y');
+    el.style.removeProperty('--toast-dx');
+    el.style.removeProperty('--toast-dy');
+  };
 
+  el.textContent = msg;
   clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => el.classList.remove('show'), 1400);
+  el.classList.remove('show', 'throw', 'tone-gold', 'tone-mystic', 'tone-neutral');
+  clearThrowVars();
+
+  if (tone === 'mystic') el.classList.add('tone-mystic');
+  else if (tone === 'gold') el.classList.add('tone-gold');
+  else el.classList.add('tone-neutral');
+
+  // reflow to restart CSS animations reliably on repeated taps
+  void el.offsetWidth;
+
+  if (thrown && anchorEl && typeof anchorEl.getBoundingClientRect === 'function') {
+    const rect = anchorEl.getBoundingClientRect();
+    // Start just outside the copy button so feedback stays local.
+    const startX = rect.right + 6;
+    const startY = rect.top + (rect.height * 0.5);
+
+    // Keep the path short but clearly diagonal to upper-right.
+    const dx = clamp(Math.round(rect.width * 0.48), 18, 34);
+    const dy = -clamp(Math.round(rect.height * 0.58), 20, 38);
+
+    el.style.setProperty('--toast-x', `${Math.round(startX)}px`);
+    el.style.setProperty('--toast-y', `${Math.round(startY)}px`);
+    el.style.setProperty('--toast-dx', `${dx}px`);
+    el.style.setProperty('--toast-dy', `${dy}px`);
+
+    el.classList.add('throw', 'show');
+    const throwDurationMs = 1220;
+    showToast._t = setTimeout(() => {
+      el.classList.remove('show', 'throw');
+      clearThrowVars();
+    }, throwDurationMs + 80);
+    return;
+  }
+
+  el.classList.add('show');
+  showToast._t = setTimeout(() => {
+    el.classList.remove('show');
+  }, Math.max(520, durationMs));
 }
 
 function triggerTapFeedback(el) {
@@ -1625,9 +1674,14 @@ function renderSpread() {
     });
   });
 
-  bindButtonAction(document.getElementById('copySpreadBtn'), async () => {
+  const copySpreadBtn = document.getElementById('copySpreadBtn');
+  bindButtonAction(copySpreadBtn, async () => {
     const ok = await copyTextToClipboard(formatSpreadForCopy());
-    showToast(ok ? 'Copied ✅' : 'Copy failed');
+    showToast(ok ? 'Copied!' : 'Copy failed', {
+      anchorEl: copySpreadBtn,
+      thrown: true,
+      tone: 'gold'
+    });
   }, 110);
 
   bindButtonAction(document.getElementById('spreadDetailBtn'), () => {
@@ -1805,7 +1859,11 @@ if (copyBtn) {
   bindButtonAction(copyBtn, async () => {
     const text = formatSingleCardForCopy(viewIndex);
     const ok = await copyTextToClipboard(text);
-    showToast(ok ? 'Copied ✅' : 'Copy failed');
+    showToast(ok ? 'Copied!' : 'Copy failed', {
+      anchorEl: copyBtn,
+      thrown: true,
+      tone: card.reversed ? 'mystic' : 'gold'
+    });
     copyBtn.classList.remove('copy-feedback');
     // restart pulse feedback animation on each click
     void copyBtn.offsetWidth;
