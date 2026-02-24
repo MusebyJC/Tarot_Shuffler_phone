@@ -34,6 +34,8 @@ const SHUFFLE_BACK_GUARD_BASE_MS = 80;
 const SHUFFLE_BACK_GUARD_MIN_MS = 120;
 const SHUFFLE_BACK_GUARD_MAX_MS = 900;
 const SHUFFLE_BACK_GUARD_FACTOR = 0.35;
+const BUTTON_JSON_CLICK_DELAY_MS = 520;
+const PICKER_WHEEL_ICON_REST_DELAY_MS = 180;
 
 // Screen control Lotties
 const ICONS = {
@@ -128,8 +130,9 @@ async function mountLottieInteractive(
 
   const host = container.closest('button') || container;
   let lastTriggerTs = 0;
-  const trigger = () => {
+  const trigger = ({ restart = true } = {}) => {
     if (host instanceof HTMLButtonElement && host.disabled) return;
+    if (!restart && !anim.isPaused) return;
     const now = performance.now();
     if (now - lastTriggerTs < 100) return;
     lastTriggerTs = now;
@@ -152,6 +155,11 @@ async function mountLottieInteractive(
   host.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') trigger();
   });
+
+  anim.__triggerOnce = trigger;
+  anim.__setRestFrame = setRestFrame;
+  anim.__hostEl = host;
+  anim.__containerEl = container;
 
   return anim;
 }
@@ -472,9 +480,12 @@ function setupPickerLogo() {
 }
 
 function mountPickerControlLotties() {
+  clearPickerStartLottieIdle();
+  pickerStartLottieAnim = null;
   const start = document.getElementById('iconStartDraw');
   if (start) {
     mountLottieInteractive(start, startLottieUrl, { sizePx: 28, colorHex: '#1d1300' })
+      .then((anim) => { pickerStartLottieAnim = anim; })
       .catch(() => {});
   }
 }
@@ -491,12 +502,40 @@ function animAsset(name){
 }
 
 let activeWheelCtrl = null; // set by initWheel()
+let pickerStartLottieAnim = null;
+let pickerStartLottieIdleTimer = null;
 
 
 
 function stepActiveWheel(delta) {
   if (!activeWheelCtrl) return;
   activeWheelCtrl.step(delta);
+}
+
+function clearPickerStartLottieIdle() {
+  clearTimeout(pickerStartLottieIdleTimer);
+  pickerStartLottieIdleTimer = null;
+}
+
+function triggerPickerStartLottieFromWheel() {
+  if (screen !== 'picker') return;
+  const anim = pickerStartLottieAnim;
+  if (!anim || typeof anim.__triggerOnce !== 'function') return;
+
+  const host = anim.__hostEl || anim.__containerEl;
+  if (host && !host.isConnected) {
+    pickerStartLottieAnim = null;
+    clearPickerStartLottieIdle();
+    return;
+  }
+
+  anim.__triggerOnce({ restart: false });
+
+  clearPickerStartLottieIdle();
+  pickerStartLottieIdleTimer = setTimeout(() => {
+    if (pickerStartLottieAnim !== anim) return;
+    if (typeof anim.__setRestFrame === 'function') anim.__setRestFrame();
+  }, PICKER_WHEEL_ICON_REST_DELAY_MS);
 }
 
 const LOCAL_ASSETS = import.meta.glob(
@@ -775,6 +814,10 @@ function triggerTapFeedback(el) {
 function bindButtonAction(buttonEl, action, delayMs = 120) {
   if (!buttonEl) return;
   let busy = false;
+  const hasJsonIcon = !!buttonEl.querySelector('.lottie');
+  const effectiveDelayMs = hasJsonIcon
+    ? Math.max(delayMs, BUTTON_JSON_CLICK_DELAY_MS)
+    : delayMs;
 
   buttonEl.addEventListener('click', () => {
     if (buttonEl.disabled || busy) return;
@@ -789,8 +832,8 @@ function bindButtonAction(buttonEl, action, delayMs = 120) {
       }
     };
 
-    if (delayMs > 0) {
-      setTimeout(() => { void run(); }, delayMs);
+    if (effectiveDelayMs > 0) {
+      setTimeout(() => { void run(); }, effectiveDelayMs);
     } else {
       void run();
     }
@@ -807,6 +850,76 @@ const SUIT_SYMBOLS = {
   Wands: '🪄', Cups: '🏆', Swords: '⚔️', Pentacles: '⭐',
   Nature: '🌿', Soul: '👁️', Blood: '🩸', Jewels: '💎'
 };
+
+const MINOR_RANK_ROMAN = {
+  Ace: 'I',
+  Two: 'II',
+  Three: 'III',
+  Four: 'IV',
+  Five: 'V',
+  Six: 'VI',
+  Seven: 'VII',
+  Eight: 'VIII',
+  Nine: 'IX',
+  Ten: 'X'
+};
+
+const MINOR_COURT_EMOJI = {
+  Page: '🧒',
+  Knight: '🐎',
+  Queen: '👑',
+  King: '🤴',
+  Child: '👶',
+  Animal: '🐾',
+  Woman: '👩',
+  Man: '👨'
+};
+
+function toRomanNumeral(value) {
+  const num = Math.floor(Number(value));
+  if (!Number.isFinite(num) || num <= 0) return '';
+
+  const numerals = [
+    [1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'],
+    [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'],
+    [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I'],
+  ];
+
+  let remaining = num;
+  let out = '';
+  for (const [v, glyph] of numerals) {
+    while (remaining >= v) {
+      out += glyph;
+      remaining -= v;
+    }
+  }
+  return out;
+}
+
+function getSpreadMinorRankShort(cardName) {
+  const rankRaw = String(cardName || '').split(' of ')[0].trim();
+  if (!rankRaw) return '•';
+  if (/^\d+$/.test(rankRaw)) {
+    const numRank = parseInt(rankRaw, 10);
+    return toRomanNumeral(numRank) || rankRaw;
+  }
+  return MINOR_RANK_ROMAN[rankRaw] || MINOR_COURT_EMOJI[rankRaw] || rankRaw.slice(0, 2).toUpperCase();
+}
+
+function getSpreadMiniBadge(card, deckId) {
+  const symbol = getCardSymbol(card, deckId);
+
+  if (card.type === 'major') {
+    return String(card.name || 'Major Arcana');
+  }
+
+  if (card.type === 'minor') {
+    const rank = getSpreadMinorRankShort(card.name);
+    return `${rank} | ${symbol}`;
+  }
+
+  return String(card.name || `${toRomanNumeral(card.number || 0)} | ${symbol}`);
+}
 
 function getCardSymbol(card, deckId) {
   if (card.type === 'major') {
@@ -854,7 +967,7 @@ function renderPickerDeck() {
       <h1 class="picker-heading">TAROT</h1>
 
       <div class="picker-single">
-        <div class="picker-label">DECK</div>
+        <div class="picker-label picker-label-deck">CHOOSE YOUR DECK</div>
 
         <div class="wheel-mask">
           <div class="wheel-highlight"></div>
@@ -872,9 +985,9 @@ function renderPickerDeck() {
       </div>
 
       <div class="picker-footer">
-        <button id="startBtn" class="btn-start" aria-label="Start draw">
+        <button id="startBtn" class="btn-start" aria-label="Shuffle deck">
           <span class="lottie" id="iconStartDraw"></span>
-          <span class="btn-label">START DRAW</span>
+          <span class="btn-label">SHUFFLE DECK</span>
         </button>
       </div>
     </div>
@@ -936,6 +1049,7 @@ function setActiveWheelController(ctrl) {
 function initWheel(el, defaultIdx, onChange) {
   const items = Array.from(el.querySelectorAll('.wheel-item'));
   const totalItems = items.length;
+  const mask = el.closest('.wheel-mask') || el.parentElement;
 
   let ITEM_H = getRowHeightPx(el);
 
@@ -947,10 +1061,39 @@ function initWheel(el, defaultIdx, onChange) {
     // ensure scroll snaps to correct pixel increments after resize
     el.scrollTop = currentIdx * ITEM_H;
     updateStyles(currentIdx);
+    setLockedItem(currentIdx);
   }
 
   let currentIdx = Math.max(0, Math.min(defaultIdx, totalItems - 1));
   let scrollTimer = null;
+  let lockTimer = null;
+
+  function setLockedItem(lockedIdx = -1) {
+    items.forEach((item, i) => {
+      item.classList.toggle('locked', i === lockedIdx);
+    });
+  }
+
+  function getCenterAlignedIndex(fallbackIdx = currentIdx) {
+    if (!items.length) return 0;
+    const maskRect = (mask?.getBoundingClientRect?.() || el.getBoundingClientRect());
+    const centerY = maskRect.top + (maskRect.height / 2);
+
+    let bestIdx = Math.max(0, Math.min(fallbackIdx, totalItems - 1));
+    let bestDist = Number.POSITIVE_INFINITY;
+
+    items.forEach((item, i) => {
+      const rect = item.getBoundingClientRect();
+      const itemCenterY = rect.top + (rect.height / 2);
+      const dist = Math.abs(itemCenterY - centerY);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
+    });
+
+    return bestIdx;
+  }
 
   function updateStyles(activeIdx) {
     items.forEach((item, i) => {
@@ -967,17 +1110,28 @@ function initWheel(el, defaultIdx, onChange) {
     currentIdx = clamped;
     el.scrollTo({ top: clamped * ITEM_H, behavior: smooth ? 'smooth' : 'auto' });
     updateStyles(clamped);
+    if (!smooth) setLockedItem(clamped);
     onChange(clamped);
   }
 
   function snapToNearest() {
-    const idx = Math.round(el.scrollTop / ITEM_H);
+    const idx = getCenterAlignedIndex(currentIdx);
     scrollToIdx(idx, true);
+    clearTimeout(lockTimer);
+    lockTimer = setTimeout(() => {
+      if (!el.isConnected) return;
+      const centeredIdx = getCenterAlignedIndex(currentIdx);
+      currentIdx = centeredIdx;
+      updateStyles(centeredIdx);
+      setLockedItem(centeredIdx);
+      onChange(centeredIdx);
+    }, 130);
   }
 
   // ✅ initial sizing + position
   refreshWheelSizing();
   onChange(currentIdx);
+  setLockedItem(currentIdx);
 
   // ✅ auto-update on resize/orientation
   const onResize = () => refreshWheelSizing();
@@ -990,6 +1144,7 @@ function initWheel(el, defaultIdx, onChange) {
     getIndex() { return currentIdx; },
     setIndex(i) { scrollToIdx(i, true); },
     destroy() {
+      clearTimeout(lockTimer);
       window.removeEventListener('resize', onResize);
       if (activeWheelCtrl && activeWheelCtrl.getIndex === this.getIndex) activeWheelCtrl = null;
     }
@@ -997,10 +1152,12 @@ function initWheel(el, defaultIdx, onChange) {
 
   el.addEventListener('scroll', () => {
     clearTimeout(scrollTimer);
-    const approxIdx = Math.round(el.scrollTop / ITEM_H);
-    const clamped = Math.max(0, Math.min(approxIdx, totalItems - 1));
+    clearTimeout(lockTimer);
+    setLockedItem(-1);
+    const clamped = getCenterAlignedIndex(currentIdx);
     currentIdx = clamped;
     updateStyles(clamped);
+    triggerPickerStartLottieFromWheel();
     scrollTimer = setTimeout(snapToNearest, 110);
   }, { passive: true });
 
@@ -1281,14 +1438,18 @@ function renderSpread() {
             ${row.cards.map((card) => {
               const cardIdx = drawnCards.indexOf(card);
               const hasImg = !!(deckInfo.hasImages && card.image);
+              const majorClass = card.type === 'major' ? 'major-arcana' : '';
               return `
-                <div class="spread-card ${card.reversed ? 'reversed' : ''}" data-idx="${cardIdx}">
-                  ${hasImg
-                    ? `<img class="spread-img" src="${card.image}" alt="${card.name}"
-                         onerror="this.outerHTML='<div class=\\'spread-symbol\\'>${getCardSymbol(card, deckInfo.id)}</div>'" />`
-                    : `<div class="spread-symbol">${getCardSymbol(card, deckInfo.id)}</div>`
-                  }
-                  <div class="spread-label">${card.reversed ? '↓' : ''}</div>
+                <div class="spread-card-wrap ${card.reversed ? 'reversed' : ''} ${majorClass}" data-idx="${cardIdx}">
+                  <div class="spread-mini-badge ${card.reversed ? 'rev' : 'up'} ${majorClass}">${getSpreadMiniBadge(card, deckInfo.id)}</div>
+                  <div class="spread-card ${card.reversed ? 'reversed' : ''} ${majorClass}">
+                    ${hasImg
+                      ? `<img class="spread-img" src="${card.image}" alt="${card.name}"
+                           onerror="this.outerHTML='<div class=\\'spread-symbol\\'>${getCardSymbol(card, deckInfo.id)}</div>'" />`
+                      : `<div class="spread-symbol">${getCardSymbol(card, deckInfo.id)}</div>`
+                    }
+                    <div class="spread-label">${card.reversed ? '↓' : ''}</div>
+                  </div>
                 </div>
               `;
             }).join('')}
@@ -1311,13 +1472,13 @@ function renderSpread() {
   `;
 
   let cardTransitioning = false;
-  document.querySelectorAll('.spread-card').forEach(el => {
+  document.querySelectorAll('.spread-card-wrap').forEach(el => {
     el.addEventListener('click', () => {
       if (cardTransitioning) return;
       const idx = parseInt(el.dataset.idx, 10);
       if (Number.isNaN(idx)) return;
       cardTransitioning = true;
-      triggerTapFeedback(el);
+      triggerTapFeedback(el.querySelector('.spread-card') || el);
       setTimeout(() => renderCard(idx), 140);
     });
   });
