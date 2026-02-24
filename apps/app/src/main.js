@@ -18,10 +18,16 @@ const LOADING_GIF_URLS = Object.values(LOADING_GIFS).filter(
 );
 const CARD_TAKE_AWAY_DURATION_MS = 460;
 const LOADING_SCREEN_DURATION_MS = 2400;
+const LOADING_SPREAD_IMAGE_TIMEOUT_MS = 6500;
+const LOADING_SCREEN_SETTLE_MS = 120;
+const LOADING_SCREEN_FORCE_FALLBACK_MS = LOADING_SCREEN_DURATION_MS + LOADING_SPREAD_IMAGE_TIMEOUT_MS + 700;
 const SHUFFLE_SCREEN_DURATION_MS = 2800;
 const MAX_GRID_PICK_CARDS = 20;
-const SHUFFLE_BACK_PRELOAD_MIN_DELAY_MS = 140;
-const SHUFFLE_BACK_PRELOAD_TIMEOUT_MS = 550;
+const SHUFFLE_BACK_PRELOAD_TIMEOUT_MS = 2200;
+const SHUFFLE_BACK_GUARD_BASE_MS = 80;
+const SHUFFLE_BACK_GUARD_MIN_MS = 120;
+const SHUFFLE_BACK_GUARD_MAX_MS = 900;
+const SHUFFLE_BACK_GUARD_FACTOR = 0.35;
 
 // Screen control Lotties
 const ICONS = {
@@ -159,31 +165,87 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function preloadImageUrl(url, timeoutMs = 1500) {
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function preloadImageUrlWithStats(url, timeoutMs = 1500) {
   return new Promise((resolve) => {
+    const startedAt = performance.now();
+
     if (!url) {
-      resolve(false);
+      resolve({ ok: false, durationMs: 0, timedOut: false });
       return;
     }
 
     const img = new Image();
     let settled = false;
-    const done = (ok) => {
+    const done = (ok, timedOut = false) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeoutId);
       img.onload = null;
       img.onerror = null;
-      resolve(ok);
+      resolve({
+        ok,
+        timedOut,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
     };
 
-    img.onload = () => done(true);
-    img.onerror = () => done(false);
+    img.onload = () => done(true, false);
+    img.onerror = () => done(false, false);
 
-    const timeoutId = setTimeout(() => done(false), timeoutMs);
+    const timeoutId = setTimeout(() => done(false, true), timeoutMs);
     img.decoding = 'async';
     img.src = url;
   });
+}
+
+async function preloadImageUrl(url, timeoutMs = 1500) {
+  const result = await preloadImageUrlWithStats(url, timeoutMs);
+  return result.ok;
+}
+
+function computeShuffleBackGuardMs(loadStats) {
+  if (!loadStats?.ok) return SHUFFLE_BACK_GUARD_MIN_MS;
+  const dynamic = SHUFFLE_BACK_GUARD_BASE_MS + (loadStats.durationMs * SHUFFLE_BACK_GUARD_FACTOR);
+  return Math.round(clamp(dynamic, SHUFFLE_BACK_GUARD_MIN_MS, SHUFFLE_BACK_GUARD_MAX_MS));
+}
+
+function getCurrentSpreadImageUrls() {
+  const deckInfo = DECK_LIST[currentDeckIdx];
+  if (!deckInfo?.hasImages) return [];
+
+  const seen = new Set();
+  const urls = [];
+  for (const card of drawnCards) {
+    const url = card?.image;
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    urls.push(url);
+  }
+  return urls;
+}
+
+async function preloadCurrentSpreadImages(timeoutMs = LOADING_SPREAD_IMAGE_TIMEOUT_MS) {
+  const urls = getCurrentSpreadImageUrls();
+  if (!urls.length) return { total: 0, loaded: 0, failed: 0, maxDurationMs: 0 };
+
+  const results = await Promise.all(
+    urls.map((url) => preloadImageUrlWithStats(url, timeoutMs))
+  );
+
+  let loaded = 0;
+  let failed = 0;
+  let maxDurationMs = 0;
+  for (const r of results) {
+    if (r.ok) loaded += 1;
+    else failed += 1;
+    maxDurationMs = Math.max(maxDurationMs, r.durationMs || 0);
+  }
+
+  return { total: urls.length, loaded, failed, maxDurationMs };
 }
 
 function prewarmLoadingGifs(limit = 8) {
@@ -255,6 +317,7 @@ let logoStillFrameDataUrl = null;
 let logoFreezeTimer = null;
 let logoDecodePromise = null;
 let loadingTimer = null;
+let loadingRunId = 0;
 
 function buildLogoStillFrame(gifWidth, gifHeight, frames) {
   if (!frames || !frames.length) return null;
@@ -912,11 +975,14 @@ async function doShuffle() {
   prewarmLoadingGifs(10);
 
   if (backUrl) {
-    await Promise.all([
-      sleep(SHUFFLE_BACK_PRELOAD_MIN_DELAY_MS),
-      preloadImageUrl(backUrl, SHUFFLE_BACK_PRELOAD_TIMEOUT_MS),
-    ]);
+    const backLoadStats = await preloadImageUrlWithStats(backUrl, SHUFFLE_BACK_PRELOAD_TIMEOUT_MS);
     if (runId !== shuffleRunId) return;
+
+    const guardMs = computeShuffleBackGuardMs(backLoadStats);
+    if (guardMs > 0) {
+      await sleep(guardMs);
+      if (runId !== shuffleRunId) return;
+    }
   }
 
   const style = backUrl
@@ -1043,6 +1109,7 @@ function renderGrid() {
 function renderLoading() {
   screen = 'loading';
   clearTimeout(loadingTimer);
+  const runId = ++loadingRunId;
 
   app.innerHTML = `
     <div class="loading-screen">
@@ -1089,9 +1156,22 @@ function renderLoading() {
     loadingFallbackEl?.classList.add('show');
   }
 
+  const minDelayPromise = sleep(LOADING_SCREEN_DURATION_MS);
+  const spreadPreloadPromise = preloadCurrentSpreadImages(LOADING_SPREAD_IMAGE_TIMEOUT_MS);
+
+  void (async () => {
+    await Promise.all([minDelayPromise, spreadPreloadPromise]);
+    await sleep(LOADING_SCREEN_SETTLE_MS);
+    if (runId !== loadingRunId || screen !== 'loading') return;
+    clearTimeout(loadingTimer);
+    renderSpread();
+  })();
+
+  // safety fallback in case image preload hangs due platform bugs
   loadingTimer = setTimeout(() => {
-    if (screen === 'loading') renderSpread();
-  }, LOADING_SCREEN_DURATION_MS);
+    if (runId !== loadingRunId || screen !== 'loading') return;
+    renderSpread();
+  }, LOADING_SCREEN_FORCE_FALLBACK_MS);
 }
 // ------------------------------------------------------------
 // SPREAD VIEW
