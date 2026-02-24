@@ -494,11 +494,11 @@ button.tap-feedback{
   color: rgba(212, 175, 55, 0.5);
 }
 
-.s1 { animation: shuffleCard1 0.7s ease-in-out 2; }
-.s2 { animation: shuffleCard2 0.7s ease-in-out 2; animation-delay: 0.08s; }
-.s3 { animation: shuffleCard3 0.7s ease-in-out 2; animation-delay: 0.16s; }
-.s4 { animation: shuffleCard4 0.7s ease-in-out 2; animation-delay: 0.24s; }
-.s5 { animation: shuffleCard5 0.7s ease-in-out 2; animation-delay: 0.32s; }
+.s1 { animation: shuffleCard1 0.7s ease-in-out 4; }
+.s2 { animation: shuffleCard2 0.7s ease-in-out 4; animation-delay: 0.08s; }
+.s3 { animation: shuffleCard3 0.7s ease-in-out 4; animation-delay: 0.16s; }
+.s4 { animation: shuffleCard4 0.7s ease-in-out 4; animation-delay: 0.24s; }
+.s5 { animation: shuffleCard5 0.7s ease-in-out 4; animation-delay: 0.32s; }
 
 @keyframes shuffleCard1 {
   0%   { transform: translate(-50%, -50%) rotate(-12deg) translateX(-14vw); }

@@ -18,6 +18,7 @@ const LOADING_GIF_URLS = Object.values(LOADING_GIFS).filter(
 );
 const CARD_TAKE_AWAY_DURATION_MS = 460;
 const LOADING_SCREEN_DURATION_MS = 2400;
+const SHUFFLE_SCREEN_DURATION_MS = 2800;
 const MAX_GRID_PICK_CARDS = 20;
 const SHUFFLE_BACK_PRELOAD_MIN_DELAY_MS = 140;
 const SHUFFLE_BACK_PRELOAD_TIMEOUT_MS = 550;
@@ -529,18 +530,37 @@ const DECKS_MAP = {};
 DECK_LIST.forEach(d => DECKS_MAP[d.id] = d);
 
 // ------------------------------------------------------------
-// SECURE RANDOM SHUFFLE (crypto)
+// SECURE RANDOM SHUFFLE (crypto, unbiased)
 // ------------------------------------------------------------
-function secureRandom() {
+function secureRandomInt(maxExclusive) {
+  if (!Number.isInteger(maxExclusive) || maxExclusive <= 0) return 0;
+
+  const cryptoObj = window.crypto || window.msCrypto;
+  if (!cryptoObj?.getRandomValues) {
+    return Math.floor(Math.random() * maxExclusive);
+  }
+
+  const UINT32_RANGE = 0x100000000; // 2^32
+  const limit = UINT32_RANGE - (UINT32_RANGE % maxExclusive);
   const arr = new Uint32Array(1);
-  (window.crypto || window.msCrypto).getRandomValues(arr);
-  return arr[0] / (0xFFFFFFFF + 1);
+
+  let x = 0;
+  do {
+    cryptoObj.getRandomValues(arr);
+    x = arr[0];
+  } while (x >= limit);
+
+  return x % maxExclusive;
+}
+
+function randomBool50() {
+  return secureRandomInt(2) === 1;
 }
 
 function shuffleDeck(deck) {
-  const shuffled = deck.map(card => ({ ...card, reversed: secureRandom() < 0.5 }));
+  const shuffled = deck.map(card => ({ ...card, reversed: randomBool50() }));
   for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(secureRandom() * (i + 1));
+    const j = secureRandomInt(i + 1);
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
   return shuffled;
@@ -918,7 +938,7 @@ async function doShuffle() {
   setTimeout(() => {
     if (runId !== shuffleRunId) return;
     if (screen === 'shuffling') renderGrid();
-  }, 1400);
+  }, SHUFFLE_SCREEN_DURATION_MS);
 }
 
 // ------------------------------------------------------------
