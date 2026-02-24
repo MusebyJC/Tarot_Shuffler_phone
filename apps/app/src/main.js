@@ -18,9 +18,15 @@ const LOADING_GIF_URLS = Object.values(LOADING_GIFS).filter(
 );
 const CARD_TAKE_AWAY_DURATION_MS = 460;
 const LOADING_SCREEN_DURATION_MS = 2400;
-const LOADING_SPREAD_IMAGE_TIMEOUT_MS = 6500;
+const LOADING_SPREAD_TIMEOUT_MIN_MS = 5200;
+const LOADING_SPREAD_TIMEOUT_MAX_MS = 26000;
+const LOADING_SPREAD_BASE_TIMEOUT_MS = 5200;
+const LOADING_SPREAD_PER_CARD_TIMEOUT_MS = 420;
+const LOADING_SPREAD_PRIMORDIAL_BOOST_MS = 4200;
+const LOADING_SPREAD_HISTORY_MULTIPLIER = 1.2;
+const SPREAD_LOAD_HISTORY_ALPHA = 0.35;
 const LOADING_SCREEN_SETTLE_MS = 120;
-const LOADING_SCREEN_FORCE_FALLBACK_MS = LOADING_SCREEN_DURATION_MS + LOADING_SPREAD_IMAGE_TIMEOUT_MS + 700;
+const LOADING_SCREEN_FALLBACK_BUFFER_MS = 700;
 const SHUFFLE_SCREEN_DURATION_MS = 2800;
 const MAX_GRID_PICK_CARDS = 20;
 const SHUFFLE_BACK_PRELOAD_TIMEOUT_MS = 2200;
@@ -151,6 +157,7 @@ async function mountLottieInteractive(
 }
 
 const loadingGifWarmStatus = new Map();
+const spreadLoadHistoryMsByDeck = new Map();
 
 function shuffledCopy(list) {
   const arr = [...list];
@@ -213,6 +220,10 @@ function computeShuffleBackGuardMs(loadStats) {
   return Math.round(clamp(dynamic, SHUFFLE_BACK_GUARD_MIN_MS, SHUFFLE_BACK_GUARD_MAX_MS));
 }
 
+function getCurrentDeckId() {
+  return DECK_LIST[currentDeckIdx]?.id || 'unknown';
+}
+
 function getCurrentSpreadImageUrls() {
   const deckInfo = DECK_LIST[currentDeckIdx];
   if (!deckInfo?.hasImages) return [];
@@ -228,12 +239,45 @@ function getCurrentSpreadImageUrls() {
   return urls;
 }
 
-async function preloadCurrentSpreadImages(timeoutMs = LOADING_SPREAD_IMAGE_TIMEOUT_MS) {
-  const urls = getCurrentSpreadImageUrls();
+function getDynamicSpreadPreloadTimeoutMs(urlCount = getCurrentSpreadImageUrls().length) {
+  const deckId = getCurrentDeckId();
+  const byCount = LOADING_SPREAD_BASE_TIMEOUT_MS + (urlCount * LOADING_SPREAD_PER_CARD_TIMEOUT_MS);
+  const deckBoost = deckId === 'primordial' ? LOADING_SPREAD_PRIMORDIAL_BOOST_MS : 0;
+
+  const historyMs = spreadLoadHistoryMsByDeck.get(deckId) || 0;
+  const byHistory = historyMs > 0
+    ? Math.round(historyMs * LOADING_SPREAD_HISTORY_MULTIPLIER)
+    : 0;
+
+  const dynamicMs = Math.max(byCount + deckBoost, byHistory);
+  return Math.round(clamp(dynamicMs, LOADING_SPREAD_TIMEOUT_MIN_MS, LOADING_SPREAD_TIMEOUT_MAX_MS));
+}
+
+function updateSpreadLoadHistory(deckId, sampleMs) {
+  if (!deckId || !Number.isFinite(sampleMs) || sampleMs <= 0) return;
+
+  const prev = spreadLoadHistoryMsByDeck.get(deckId);
+  if (typeof prev !== 'number') {
+    spreadLoadHistoryMsByDeck.set(deckId, Math.round(sampleMs));
+    return;
+  }
+
+  const next = Math.round((prev * (1 - SPREAD_LOAD_HISTORY_ALPHA)) + (sampleMs * SPREAD_LOAD_HISTORY_ALPHA));
+  spreadLoadHistoryMsByDeck.set(deckId, next);
+}
+
+async function preloadCurrentSpreadImages(timeoutMs, urlsInput = null) {
+  const urls = Array.isArray(urlsInput) ? urlsInput : getCurrentSpreadImageUrls();
   if (!urls.length) return { total: 0, loaded: 0, failed: 0, maxDurationMs: 0 };
 
+  const safeTimeoutMs = Math.round(clamp(
+    timeoutMs ?? getDynamicSpreadPreloadTimeoutMs(urls.length),
+    LOADING_SPREAD_TIMEOUT_MIN_MS,
+    LOADING_SPREAD_TIMEOUT_MAX_MS
+  ));
+
   const results = await Promise.all(
-    urls.map((url) => preloadImageUrlWithStats(url, timeoutMs))
+    urls.map((url) => preloadImageUrlWithStats(url, safeTimeoutMs))
   );
 
   let loaded = 0;
@@ -244,6 +288,10 @@ async function preloadCurrentSpreadImages(timeoutMs = LOADING_SPREAD_IMAGE_TIMEO
     else failed += 1;
     maxDurationMs = Math.max(maxDurationMs, r.durationMs || 0);
   }
+
+  const deckId = getCurrentDeckId();
+  const sampleMs = Math.max(maxDurationMs, loaded > 0 ? 0 : safeTimeoutMs);
+  updateSpreadLoadHistory(deckId, sampleMs || safeTimeoutMs);
 
   return { total: urls.length, loaded, failed, maxDurationMs };
 }
@@ -1156,8 +1204,10 @@ function renderLoading() {
     loadingFallbackEl?.classList.add('show');
   }
 
+  const spreadUrls = getCurrentSpreadImageUrls();
+  const spreadPreloadTimeoutMs = getDynamicSpreadPreloadTimeoutMs(spreadUrls.length);
   const minDelayPromise = sleep(LOADING_SCREEN_DURATION_MS);
-  const spreadPreloadPromise = preloadCurrentSpreadImages(LOADING_SPREAD_IMAGE_TIMEOUT_MS);
+  const spreadPreloadPromise = preloadCurrentSpreadImages(spreadPreloadTimeoutMs, spreadUrls);
 
   void (async () => {
     await Promise.all([minDelayPromise, spreadPreloadPromise]);
@@ -1171,7 +1221,7 @@ function renderLoading() {
   loadingTimer = setTimeout(() => {
     if (runId !== loadingRunId || screen !== 'loading') return;
     renderSpread();
-  }, LOADING_SCREEN_FORCE_FALLBACK_MS);
+  }, LOADING_SCREEN_DURATION_MS + spreadPreloadTimeoutMs + LOADING_SCREEN_FALLBACK_BUFFER_MS);
 }
 // ------------------------------------------------------------
 // SPREAD VIEW
